@@ -106,15 +106,19 @@ The pre-trained model weights for our key experiments are available for download
 If you find this work useful in your research, please consider citing our paper:
 
 ```bibtex
-@article{Siddiqui2025AMREnsembleNet,
+@inproceedings{Siddiqui2026AMREnsembleNet,
 	author = {Siddiqui, Md. Saiful Bari and Tarannum, Nowshin},
 	title = {Fusing Sequence Motifs and Pan-Genomic Features: Antimicrobial Resistance Prediction using an Explainable Lightweight 1D CNN - XGBoost Ensemble},
-	elocation-id = {2025.09.27.678993},
-	year = {2025},
-	doi = {10.1101/2025.09.27.678993},
-	publisher = {Cold Spring Harbor Laboratory},
-	URL = {https://www.biorxiv.org/content/early/2025/09/27/2025.09.27.678993 },
-	journal = {bioRxiv}
+	year = {2026},
+	isbn = {9798400720673},
+	publisher = {Association for Computing Machinery},
+	address = {New York, NY, USA},
+	url = {https://doi.org/10.1145/3773656.3773682},
+	doi = {10.1145/3773656.3773682},
+	booktitle = {Proceedings of the Supercomputing Asia and International Conference on High Performance Computing in Asia Pacific Region},
+	pages = {374–383},
+	location = {},
+	series = {SCA/HPCAsia '26}
 }
 ```
 
