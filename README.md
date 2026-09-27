@@ -126,3 +126,70 @@ If you find this work useful in your research, please consider citing our paper:
 
 ## License
 This project is licensed under the MIT License. See the `LICENSE` file for details.
+
+---
+---
+
+# Fork Notes: Reproduction (oliGAMER/ML_Paper_Reprod)
+
+Everything above this line is the original authors' README, kept as-is for comparison. This section documents this fork's own reproduction work for the ML Paper Reproduction & Deployment assignment. Full provenance detail (what's written by us, adapted, or reused as-is) is tracked in `PROVENANCE.md`.
+
+Team: Zaid Bilal, Omer Ibrahim Qazi, Haseeb Adnan
+
+## What's different in this fork
+
+- Environment: local training moved to Google Colab after WSL's OOM killer repeatedly killed training runs (see PROVENANCE.md for details). TensorFlow ended up pinned to 2.20.0 instead of the original 2.18.0, since 2.18.0 has no installable wheel for Colab's current Python/platform — a real, documented environment deviation, not an oversight.
+- `src/data_loader.py`: written by us. Loads and validates the SNP + phenotype CSVs against the paper's reported stats, and provides a stratified 80/20 per-antibiotic split matching Section 3.4.
+- `src/train_cnn.py`: adapted from the four original per-antibiotic CNN notebooks, consolidated into one parameterized script. Fixes a class-weight leakage bug (weights were computed on the full pre-split label array in the originals, now computed from the training split only) and a checkpoint-filename bug found in the original CTX notebook. GEN's early-stopping monitor was deliberately changed from `val_accuracy` to `val_auc` after diagnosing a training collapse under class imbalance (see PROVENANCE.md).
+- `AMR_Ensemble_Weight_Sweep.ipynb`: written by us, not part of the original repo. Sweeps the CNN/XGBoost blend weight instead of using a fixed 50/50 average, to test whether 50/50 is actually optimal per antibiotic.
+
+## Reproduction results (this fork)
+
+### 1D CNN
+
+| Antibiotic | Accuracy | MCC | Macro F1 | Recall (resistant) | Paper MCC | Paper Recall (resistant) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| CIP | 0.9198 | 0.8405 | 0.9194 | 0.9452 | 0.9129 | 0.9589 |
+| CTX | 0.8025 | 0.6030 | 0.8010 | 0.8056 | 0.5647 | 0.7778 |
+| CTZ | 0.7963 | 0.5402 | 0.7698 | 0.6727 | 0.5651 | 0.6727 |
+| GEN | 0.7778 | 0.3136 | 0.6495 | 0.3684 | 0.3984 | 0.7105 |
+
+CTX and CTZ are close to the paper on every metric. CIP needed a re-run to close an initial gap attributed to GPU run-to-run variance. GEN initially collapsed entirely under the original `val_accuracy` early-stopping monitor (a real weakness in the original training setup for this most-imbalanced antibiotic, reproduced faithfully) and was fixed by switching to `val_auc`; the fix closes most of the gap but recall (0.368) is still below the paper's 0.7105 — see PROVENANCE.md for the full root-cause writeup.
+
+### XGBoost
+
+| Antibiotic | Accuracy | AUC | MCC | Macro F1 | Recall (resistant) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| CIP | 0.9630 | 0.9849 | 0.9252 | 0.9626 | 0.9589 |
+| CTX | 0.7963 | 0.8889 | 0.5937 | 0.7954 | 0.8194 |
+| CTZ | 0.7778 | 0.8340 | 0.5139 | 0.7564 | 0.7091 |
+| GEN | 0.7716 | 0.7620 | 0.3930 | 0.6955 | 0.5789 |
+
+CIP's XGBoost result closely matches the paper's reported XGBoost row (MCC 0.9253). GEN's XGBoost recall (0.5789) matches the paper's own XGBoost recall exactly — unlike the CNN, XGBoost did not collapse on the imbalanced antibiotic.
+
+### Random Forest
+
+Not yet reproduced. The original repo's Random Forest baseline (`Random Forest Implementations/AMR_Project_RF_Baseline_All.ipynb`) has been reviewed for provenance purposes but not run on this fork, since it is a baseline only and not part of the CNN+XGBoost ensemble this reproduction targets.
+
+## Ensemble weight sweep (Stage 4 experiment)
+
+The proposal's planned hyperparameter study: does the best CNN/XGBoost blend weight shift with class imbalance, and can a tuned weight beat the paper's fixed 50/50 average? Swept the blend weight from 0.0 (pure XGBoost) to 1.0 (pure CNN) in steps of 0.05, per antibiotic, choosing a threshold per weight via Youden's J on that weight's ROC curve.
+
+| Antibiotic | 50/50 MCC | Best weight | Best MCC | MCC gain |
+| :--- | :--- | :--- | :--- | :--- |
+| CIP | 0.9008 | 0.00 (pure XGBoost) | 0.9252 | +0.0244 |
+| CTX | 0.6706 | 0.65 (CNN-leaning) | 0.6750 | +0.0044 |
+| CTZ | 0.5806 | 0.25 (XGBoost-leaning) | 0.5892 | +0.0087 |
+| GEN | 0.4063 | 0.45 (~same as 0.5) | 0.4063 | 0.0000 |
+
+Answer: no, 50/50 is not weight-optimal for three of the four antibiotics, though the gains are modest (+0.004 to +0.024 MCC). CIP shows the clearest case for moving off 50/50 toward pure XGBoost. The proposal's related ablation (standalone CNN vs. standalone XGBoost vs. full ensemble) is answered by the same data, since the per-model tables above plus the ensemble's 50/50 row together give all three numbers per antibiotic.
+
+## Remaining work
+
+- Class-weight formula: the original notebooks use standard inverse-frequency class weighting, but the paper's Section 3.4 states weights are inversely proportional to the square root of class frequency. Not yet resolved as a team whether to keep the code's actual formula (documenting the discrepancy) or implement the paper's stated formula as a deliberate deviation.
+- GEN's CNN recall gap: try `val_recall` as the early-stopping monitor and a threshold re-sweep, since XGBoost's GEN recall is already much closer to the paper's CNN figure without any fix.
+- Consolidate the intermediate `data_loader_full.py` into a single canonical `data_loader.py`.
+- Sequence logos from the first CNN layer's learned filters, using the SNP CSVs, for the interpretability angle flagged in the deployment plan.
+- Stage 5 deployment: a Streamlit app that takes one SNP sample and an antibiotic choice, and returns the predicted class, ensemble probability, and both component-model probabilities.
+
+Full detail, including bug fixes found in the original notebooks and the security incident writeup, is in `PROVENANCE.md`.
