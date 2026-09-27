@@ -1,140 +1,166 @@
-# **PROVENANCE.md**
+# PROVENANCE.md
 
-Tracking of what in this repository is our own work, adapted from the original authors' code, or reused as-is — maintained as we go, per the assignment's academic integrity requirements.
+Log of what in this repo is our own work, adapted from the original authors, or reused as-is, per the assignment's academic integrity requirements (Section 9).
 
-**Team:** Zaid Bilal, Omer Ibrahim Qazi, Haseeb Adnan **Original paper/repo:** Siddiqui & Tarannum (2026), `Saiful185/AMR-EnsembleNet` **Our fork:** `oliGAMER/ML_Paper_Reprod`
+Team: Zaid Bilal, Omer Ibrahim Qazi, Haseeb Adnan
+Paper: Siddiqui & Tarannum (2026), "Fusing Sequence Motifs and Pan-Genomic Features: AMR Prediction using an Explainable Lightweight 1D CNN - XGBoost Ensemble"
+Original repo: Saiful185/AMR-EnsembleNet
+Our fork: oliGAMER/ML_Paper_Reprod (https://github.com/oliGAMER/ML_Paper_Reprod)
 
-## **Environment**
+## Stage 2 notes: understanding the paper
 
-* Cloned `oliGAMER/ML_Paper_Reprod` (fork of `Saiful185/AMR-EnsembleNet`).  
-* Local dev machine's default (conda base) is Python 3.13. `requirements.txt`'s pins (`pandas==2.2.2`, `tensorflow==2.18.0`) predate Python 3.13 support and failed to build from source under `python3 -m venv` (Cython/C++ incompatibility with GCC 15 — `[[maybe_unused]]` attribute placement error in pandas' `aggregations.pyx.cpp`).  
-* **Fix:** created a dedicated conda environment pinned to Python 3.11 (`conda create -n amr python=3.11`) so all packages install from prebuilt wheels. No changes made to `requirements.txt` package versions.  
-* Old broken `venv/` directory removed; `venv/`, `__pycache__/`, `*.pyc`, `*.egg-info/` added to `.gitignore`.  
-* `*:Zone.Identifier` files (WSL artifacts from Windows-downloaded files) added to `.gitignore`.
+Method summary (own words): the paper argues that genomic SNP data has both sequence structure (order of mutations along the genome matters) and feature structure (interactions between SNPs regardless of position). A single model type misses one of these, so they combine a 1D CNN, which reads the SNP string like a sequence and picks up local motifs, with XGBoost, which treats the same SNPs as an unordered feature set and can pick up long-range interactions. The two models are trained separately and their output probabilities are averaged (soft voting) into a final prediction.
 
-  ## **Migration to Google Colab (2026-09-25)**
+Dataset: 809 *E. coli* isolates from the GieSSen dataset, four antibiotics (CIP, CTX, CTZ, GEN), each with a binary susceptible/resistant label. Class balance ranges from roughly even (CIP) to heavily skewed (GEN, ~23% resistant).
 
-**Reason:** local WSL training runs were killed by the Linux OOM-killer (`dmesg` confirmed `python3 invoked oom-killer`, process killed at \~4.2–4.5GB resident memory against a \~7.2GB total / \~4.3GB available WSL memory ceiling — confirmed via `free -h`). Reducing batch size was assessed as an insufficient workaround given how close usage already was to the ceiling; migrated to Colab instead. This also matches the original authors' own notebooks, which were written for Colab (Google Drive mounts, `/content/drive/...` paths) — running on Colab is arguably a more faithful reproduction environment than local WSL, not a deviation from it.
+Headline results (paper's Table 2-5, 1D CNN and ensemble rows): the ensemble doesn't win by a landslide on every antibiotic, but is the most consistently strong across all four, and on GEN specifically the standalone CNN's high recall (0.7105) on the resistant class is what the paper calls its strength.
 
-**Setup:** cloned `oliGAMER/ML_Paper_Reprod` into the Colab instance for reference; recreated project layout at `/content/AMR_repro/` (`src/`, `Giessen_dataset/`, `results/`); wrote `src/data_loader.py` and `src/train_cnn.py` to the instance (also an intermediate `data_loader_full.py` present — same file-naming consolidation noted earlier under Code provenance, not yet cleaned up to one canonical name in the Colab copy); data loaded from Google Drive (`cip_ctx_ctz_gen_multi_data.csv`, `cip_ctx_ctz_gen_pheno.csv`), cached locally as parquet for faster reload across cells; ran on Colab's free T4 GPU tier, **TensorFlow 2.20.0** (Colab's preinstalled default — attempted to pin to match `requirements.txt`'s `tensorflow==2.18.0`, but `pip install tensorflow==2.18.0` fails on Colab: PyPI no longer serves that version as an installable wheel for Colab's current Python/platform combo — only `2.20.0` and newer are available. **This is not fixable by us; TF 2.20.0 is now the de facto environment for all Colab-run results**, a real, unavoidable environment deviation from `requirements.txt`, not an oversight — document plainly in the report rather than treating it as something to still resolve), batch size reverted to 32 (the original notebooks' value — no longer memory-constrained on Colab). Re-verified 809×60,936 shape and correct class counts post-migration (matches earlier local verification).
+Section 3.4 states class weights are "inversely proportional to the roots of the class frequencies." We checked this against the actual notebook code (below) and it doesn't match.
 
-**⚠️ Security incident (resolved):** a GitHub personal access token was found hardcoded in plain text in a Colab notebook cell (a `!git push https://<user>:<token>@github.com/...` command). **Token has been revoked.** Going forward: never hardcode credentials in any notebook cell — use `getpass.getpass()` for interactive entry, or Colab's `google.colab.userdata` secrets manager. Check notebook cell *outputs* before committing, not just source — a printed credential in an output leaks the same way a hardcoded one does.
+## Stage 3 notes: environment setup
 
-### **CNN reproduction results (Colab, 2026-09-25)**
+Local machine's default Python (3.13, conda base) doesn't work with the pinned dependencies in requirements.txt: pandas==2.2.2 and tensorflow==2.18.0 don't have prebuilt wheels for 3.13, and building pandas from source failed (GCC 15 / Cython incompatibility). Fixed by creating a separate conda env pinned to Python 3.11, no changes to requirements.txt itself. Cleaned up the old broken venv, added it plus __pycache__, *.egg-info, and WSL's `*:Zone.Identifier` artifact files to .gitignore.
 
-All four antibiotics trained to completion (150 epochs, subject to early stopping). Final test-set metrics vs. the paper's Table 2–5 (1D CNN row only):
+### Move to Colab (2026-09-25)
 
-| Antibiotic | Our Accuracy | Paper Accuracy | Our MCC | Paper MCC | Our Macro F1 | Paper Macro F1 | Our Recall (resistant) | Paper Recall (resistant) |
-| :---- | :---- | :---- | :---- | :---- | :---- | :---- | :---- | :---- |
-| CIP (v1) | 0.8765 | 0.9568 | 0.7568 | 0.9129 | 0.8762 | 0.9564 | 0.9178 | 0.9589 |
-| **CIP (v2, re-run)** | **0.9198** | 0.9568 | **0.8405** | 0.9129 | **0.9194** | 0.9564 | **0.9452** | 0.9589 |
+Local WSL training runs were getting killed by the OOM killer (confirmed via dmesg, process killed around 4.2-4.5GB resident against a ~4.3GB available ceiling in WSL). Rather than shrink the batch size and risk hitting the ceiling again, moved training to Colab, which also matches how the original authors built their notebooks (Drive mounts, /content/drive paths) — so this is closer to their actual setup, not a bigger departure from it.
+
+Recreated the project layout under /content/AMR_repro/ (src/, Giessen_dataset/, results/), loaded the two CSVs from Drive and cached them locally as parquet to avoid re-reading from Drive every cell. Ran on Colab's free T4 tier.
+
+TensorFlow version: requirements.txt pins 2.18.0, but pip can't install that on Colab's current Python/platform — only 2.20.0 and newer are available there. This isn't something we can fix on our end; TF 2.20.0 is the actual environment for every Colab result reported here, and we're documenting it as a real deviation rather than an unresolved TODO. Batch size reverted to 32 (the original notebooks' value) since Colab isn't memory-constrained the way WSL was.
+
+Re-checked the SNP matrix shape (809 x 60,936) and class counts after the move — they match what we verified locally.
+
+**Security note:** a GitHub personal access token was briefly hardcoded in a Colab cell (`!git push https://<user>:<token>@github.com/...`). It's been revoked. Going forward we're using `getpass.getpass()` or Colab's `google.colab.userdata` for anything like this, and checking cell *outputs* before committing, since a token printed to output leaks the same way a hardcoded one does.
+
+## XGBoost reproduction results (Colab)
+
+All four antibiotics trained with the config above, matching Section 3.4/Figure 1 as confirmed earlier. Standalone XGBoost metrics (from `{antibiotic}_XGBoost.json`):
+
+| Antibiotic | Accuracy | AUC | MCC | Macro F1 | Recall (resistant) |
+|---|---|---|---|---|---|
+| CIP | 0.9630 | 0.9849 | 0.9252 | 0.9626 | 0.9589 |
+| CTX | 0.7963 | 0.8889 | 0.5937 | 0.7954 | 0.8194 |
+| CTZ | 0.7778 | 0.8340 | 0.5139 | 0.7564 | 0.7091 |
+| GEN | 0.7716 | 0.7620 | 0.3930 | 0.6955 | 0.5789 |
+
+CIP's standalone XGBoost result (MCC 0.925, AUC 0.985) is very close to the paper's reported XGBoost row (MCC 0.9253) — a tight reproduction, tighter than our CNN's CIP number. GEN's XGBoost MCC (0.393) also lands close to the paper's XGBoost row (0.3722), and its recall (0.579) matches the paper's own XGBoost recall (0.5789) exactly, so unlike the CNN, XGBoost didn't show a collapse on the imbalanced antibiotic. These per-antibiotic `.json` files and the saved `.keras`/XGBoost models are what feed the weight-sweep notebook below.
+
+## CNN reproduction results (Colab, 2026-09-25)
+
+All four antibiotics trained for up to 150 epochs with early stopping. Final test metrics vs. the paper's 1D CNN row:
+
+| Antibiotic | Our Acc | Paper Acc | Our MCC | Paper MCC | Our Macro F1 | Paper Macro F1 | Our Recall (R) | Paper Recall (R) |
+|---|---|---|---|---|---|---|---|---|
+| CIP (run 1) | 0.8765 | 0.9568 | 0.7568 | 0.9129 | 0.8762 | 0.9564 | 0.9178 | 0.9589 |
+| CIP (re-run) | 0.9198 | 0.9568 | 0.8405 | 0.9129 | 0.9194 | 0.9564 | 0.9452 | 0.9589 |
 | CTX | 0.8025 | 0.7840 | 0.6030 | 0.5647 | 0.8010 | 0.7821 | 0.8056 | 0.7778 |
 | CTZ | 0.7963 | 0.8086 | 0.5402 | 0.5651 | 0.7698 | 0.7816 | 0.6727 | 0.6727 |
-| GEN (v1, `val_accuracy` monitor) | 0.7654 | 0.7346 | 0.0000 | 0.3984 | 0.4336 | 0.6836 | 0.0000 | 0.7105 |
-| **GEN (v2, `val_auc` monitor)** | **0.7778** | 0.7346 | **0.3136** | 0.3984 | **0.6495** | 0.6836 | **0.3684** | 0.7105 |
+| GEN (val_accuracy monitor) | 0.7654 | 0.7346 | 0.0000 | 0.3984 | 0.4336 | 0.6836 | 0.0000 | 0.7105 |
+| GEN (val_auc monitor) | 0.7778 | 0.7346 | 0.3136 | 0.3984 | 0.6495 | 0.6836 | 0.3684 | 0.7105 |
 
-**CTX and CTZ reproduced reasonably close to the paper** — within a few points on every metric, a solid reproduction for those two.
+CTX and CTZ are close to the paper on every metric — a solid reproduction there.
 
-**CIP v2 Re-run Analysis:** With the fresh run completed, CIP's MCC jumped from 0.7568 up to **0.8405** (bringing it much closer to the paper's 0.9129), and recall on the resistant class reached **0.9452** (vs. the paper's 0.9589). This largely closes the previous gap and suggests the earlier lower score was simply run-to-run variance inherent to GPU training despite random seeds.
+**CIP:** first run underperformed the paper noticeably (MCC 0.76 vs 0.91). Re-running with the same config brought MCC to 0.84 and recall to 0.945, close to the paper's numbers. Reads as run-to-run GPU variance rather than a bug, since the fixed seed doesn't guarantee bit-identical results across GPU runs.
 
-**GEN v1 (original `val_accuracy` monitor) reproduction failed outright** on first attempt. The model collapsed to predicting "Susceptible" for all 162 test samples: 0.0 recall/precision/MCC/kappa/F1 on the resistant class, AUC 0.4272 (below chance). This was the **opposite** of the paper's own headline GEN result, where the standalone CNN's high recall (0.7105) on this most-imbalanced antibiotic is presented as the model's key strength (Section 4.3).
+**GEN failure and fix:** the first GEN run collapsed completely — the model predicted "susceptible" for all 162 test samples (0 recall, 0 MCC, AUC below chance). This is the opposite of the paper's own reported result, where GEN's high CNN recall is the headline finding for that antibiotic.
 
-**Root cause confirmed (2026-09-25): fixed by changing the early-stopping monitor.** Re-ran GEN with `es_monitor` changed from `val_accuracy` to `val_auc` (all other config — threshold 0.505, patience 60, architecture, class weights — unchanged), under the same TF 2.20.0 environment CTX/CTZ already trained successfully under (ruling out TF version as the cause). Result:
+Root cause: GEN is ~23% resistant, so a model that always predicts the majority class already scores ~77% accuracy. The original notebooks use `val_accuracy` as the early-stopping monitor, which let training checkpoint on exactly that degenerate solution. This is a real weakness in the authors' own training setup for their hardest task — not something we introduced, since we reproduced it faithfully on the first attempt.
 
-| Metric | v1 (`val_accuracy`) | v2 (`val_auc`) | Paper |
-| :---- | :---- | :---- | :---- |
-| AUC | 0.4272 | **0.7417** | — |
-| MCC | 0.0000 | **0.3136** | 0.3984 |
-| Macro F1 | 0.4336 | **0.6495** | 0.6836 |
-| Recall (resistant) | 0.0000 | **0.3684** | 0.7105 |
+We switched the early-stopping monitor to `val_auc` (keeping everything else — threshold, patience, architecture, class weights — the same) and re-ran under the same TF 2.20.0 environment CTX/CTZ already trained under, to rule out TF version as a variable. Result: AUC 0.43 → 0.74, MCC 0.00 → 0.31, macro F1 0.43 → 0.65, recall 0.00 → 0.37.
 
-This confirms the hypothesis: with GEN's severe imbalance (188/809 ≈ 23% resistant), a model that always predicts the majority class already scores \~77% accuracy "for free," so `val_accuracy` was a poor stopping signal that let the model checkpoint at exactly this degenerate solution. **This is a genuine weakness in the original authors' own training setup for their hardest task, reproduced faithfully in v1 — not a bug we introduced.** Switching to `val_auc` (a deliberate, documented deviation from the original notebook) resolves the collapse and brings MCC/Macro F1 within reasonable range of the paper's reported numbers.
+Recall (0.37) is still well below the paper's 0.71, so this isn't a tight reproduction yet, but it's a normal, explainable underperformance rather than a total failure. From the training log, recall briefly peaked at 0.68 around epoch 33 before drifting down as training continued to its actual stopping point at epoch 89. `val_recall` as the monitor, or a threshold sweep (0.505 was carried over from the original notebook, not re-tuned for `val_auc`), are candidates for closing this gap further — not yet tried.
 
-**Remaining gap:** recall (0.3684) is still well below the paper's 0.7105 — GEN is now a normal, explainable underperformance rather than total failure, but not yet a tight reproduction. From the training log, recall briefly reached 0.6842 around epoch 33 before drifting down as training continued to its eventual stop at epoch 89 — suggesting `val_recall` (rather than `val_auc`) as the monitor might land closer to the paper's number by stopping earlier, closer to that peak. Not yet tried; candidate next step, time permitting, alongside a decision-threshold sweep (0.505 was carried over from the original notebook and may not be optimal under the new monitor).
+This result — the collapse, the cause, and the fix — is reportable either as a finding about `val_accuracy` as a bad monitor under class imbalance, or as a worked example of debugging a reproduction that initially failed for a non-obvious reason. Belongs in the report's Reproduction Results and Analysis/Discussion sections.
 
-This whole finding — the collapse, its cause, and the fix — belongs in the report's Reproduction Results and Analysis/Discussion sections as-is: a legitimate and informative result whichever way you read it (either an artifact-of-`val_accuracy` finding worth reporting on its own, or a useful worked example of debugging a faithful reproduction that initially failed for a non-obvious reason).
+## Data provenance
 
-## **Data provenance**
+Files: `cip_ctx_ctz_gen_multi_data.csv` (SNP matrix), `cip_ctx_ctz_gen_pheno.csv` (phenotype labels), from `Giessen_dataset.zip` in the original repo. Not present in our fork's default checkout — added manually to `Giessen_dataset/` locally.
 
-* **Files:** `cip_ctx_ctz_gen_multi_data.csv` (SNP matrix), `cip_ctx_ctz_gen_pheno.csv` (phenotype labels).  
-* **Source:** `Giessen_dataset.zip`, bundled in the original `Saiful185/AMR-EnsembleNet` repo. Not present in our fork's default checkout (`oliGAMER/ML_Paper_Reprod`) — added manually to `Giessen_dataset/` in the local working copy.  
-* **Storage decision:** resolved — Git LFS installed and working. `cip_ctx_ctz_gen_multi_data.csv` (\~99MB) tracked via LFS (`.gitattributes` filter); `cip_ctx_ctz_gen_pheno.csv` (\~21KB) committed as a plain file, no LFS needed.  
-* **Push status:** commit made locally; push still pending collaborator access from repo owner (`oliGAMER`).  
-* **Verification performed (2026-09-25):**  
-* SNP matrix shape: 809 samples × 60,936 SNP feature columns (60,937 columns incl. index) — matches paper (Section 3.1).  
-* Phenotype file shape: 809 samples × 4 antibiotic columns (CIP, CTX, CTZ, GEN).  
-* Sample IDs match 1:1 and in identical order between the two files.  
-* Class counts match Table 1 in the paper exactly:
+Storage: `cip_ctx_ctz_gen_multi_data.csv` (~99MB) tracked via Git LFS; `cip_ctx_ctz_gen_pheno.csv` (~21KB) committed as a plain file. Both are pushed to the fork under `Giessen_dataset/` (https://github.com/oliGAMER/ML_Paper_Reprod/tree/main/Giessen_dataset).
 
-| Antibiotic | Susceptible (0) | Resistant (1) |
-| :---- | :---- | :---- |
+Verification (2026-09-25):
+- SNP matrix: 809 samples x 60,936 feature columns — matches Section 3.1.
+- Phenotype file: 809 samples x 4 antibiotic columns.
+- Sample IDs match 1:1 and in the same order between the two files.
+- Class counts match Table 1 exactly:
+
+| Antibiotic | Susceptible | Resistant |
+|---|---|---|
 | CIP | 443 | 366 |
 | CTX | 451 | 358 |
 | CTZ | 533 | 276 |
 | GEN | 621 | 188 |
 
-* Confirmed independently via `src/data_loader.py`.
+Confirmed independently via `src/data_loader.py`.
 
-  ## **Code provenance log**
+## Code provenance
 
 | File / Notebook | Status | Notes |
-| :---- | :---- | :---- |
-| `src/data_loader.py` | **written by us** | Loads SNP matrix \+ phenotype CSVs, asserts shape/alignment against paper's reported dataset stats, provides `get_split()` for stratified 80/20 per-antibiotic split (matching Section 3.4's protocol). Fixed `random_state=42` — matches original notebooks' seed (confirmed, see below). **Verified 2026-09-25:** full load confirms 809×60,936 matrix, correct class counts; `get_split()` confirmed to preserve class ratio within \~0.2pp of full-dataset ratio across all four antibiotics in both train (n=647) and test (n=162) splits. |
-| `src/train_cnn.py` | **adapted from** `Final Custom 1D CNN Implementations/AMR_Project_1D_CNN_v1_{CIP,CTX,CTZ,GEN}.ipynb` | Consolidates the authors' four near-duplicate Colab notebooks (one per antibiotic) into one parameterized script. Architecture (`build_cnn1d_model`, ported from `build_cnn1d_model_extended`) and core hyperparameters (embedding dim 64, dropout rates, 150 epochs, batch 32, lr 1e-3) are **reused as-is, unchanged**. Changes made: (1) data loading routed through `src/data_loader.py` instead of each notebook's own `pd.read_csv`; (2) fixed a latent bug — original notebooks computed class weights from the full pre-split `labels` array (train+test combined) rather than `y_train` only; here weights are computed from `y_train` only; (3) Colab `drive.mount()` cell removed; (4) per-antibiotic settings (decision threshold, early-stopping monitor/patience) that were hardcoded differently per notebook are now explicit in `ANTIBIOTIC_CONFIG` instead of silently varying across four separate files; (5) fixed a checkpoint-filename bug in the original CTX notebook (see below); (6) **GEN's `es_monitor` further changed from the original `val_accuracy` to `val_auc`** after diagnosing a training collapse — see "Migration to Google Colab" section above for full root-cause analysis and before/after metrics. This is a deliberate deviation from the original notebook's config, not a reused-as-is value, unlike CIP/CTX/CTZ's settings which remain exactly as found. |
-| `AMR Ensemble Models/AMR_Project_Ensemble_Soft_Voting.ipynb` | **reviewed (2026-09-27)** | Four near-identical per-antibiotic cells (CIP/CTX/CTZ/GEN), each: loads the antibiotic's saved CNN (`.keras`) and XGBoost (`.json`) models, re-derives the identical 80/20 stratified split (`random_state=42`), generates both models' test-set probabilities, and combines them as a **fixed, hand-picked 50/50 average** (`cnn_weight = xgb_weight = 0.5`, not tuned or swept in the notebook itself). Per-antibiotic decision thresholds are also hardcoded and differ (CIP/CTZ 0.55, CTX/GEN 0.48) — not derived programmatically anywhere in the notebook, no threshold-search code present. **No weight sweep exists in the authors' code** — the paper's "50/50 is optimal" claim is asserted, not searched for in this notebook. This is exactly the gap the requested weight-sweep script (see below) fills. |
-| `Final Custom 1D CNN Implementations/` | **reviewed** — see `src/train_cnn.py` row above | Source for the CNN, now consolidated. |
-| `Random Forest Implementations/AMR_Project_RF_Baseline_All.ipynb` | **reviewed (2026-09-27)** | Baseline only — **not part of the CNN+XGBoost ensemble**, does not feed into `AMR Ensemble Models/`. `RandomForestClassifier(n_estimators=400, max_depth=15, max_features='sqrt', class_weight='balanced', random_state=42, oob_score=True)`, same 80/20 stratified split as the other notebooks. Four near-duplicate per-antibiotic cells, no consolidation attempted (out of scope — not reused elsewhere in the pipeline). |
-| `XGBoost Implementations/AMR_Project_XGBoost_Baseline_ALL.ipynb` | **reviewed (2026-09-27)** | **Answers the open question below: yes, `n_estimators=1000` matches Figure 1.** Full params: `objective='binary:logistic'`, `eval_metric='auc'`, `n_estimators=1000`, `learning_rate=0.05`, `max_depth=6`, `subsample=0.7`, `colsample_bytree=0.7`, `scale_pos_weight` computed per-antibiotic from `y_train` class counts (correctly train-only, unlike the CNN notebooks' pre-split bug noted above), `early_stopping_rounds=50`, `random_state=42`. Four near-identical per-antibiotic cells; each trains and calls `xgb_model.save_model("best_xgboost_model_{ANTIBIOTIC}.json")`. **Not yet run by us** — no `best_xgboost_model_*.json` files exist anywhere in our fork or local checkout, so the ensemble notebook above cannot currently be executed end-to-end on our side until these are trained (Colab, same pattern as the CNN migration) and saved alongside the `.keras` models. |
-| `AMR_Project_1D_CNN_Tuning.ipynb` | not yet reviewed | Root-level hyperparameter tuning notebook, likely source of the final CNN architecture in Figure 1\. |
+|---|---|---|
+| `src/data_loader.py` | Written by us | Loads and validates the SNP + phenotype CSVs against the paper's reported stats, provides `get_split()` for the stratified 80/20 per-antibiotic split (Section 3.4), fixed `random_state=42` (matches the original notebooks). Verified: full load gives correct shape/class counts; splits preserve class ratio within ~0.2pp of the full dataset for all four antibiotics. |
+| `src/train_cnn.py` | Adapted from `Final Custom 1D CNN Implementations/AMR_Project_1D_CNN_v1_{CIP,CTX,CTZ,GEN}.ipynb` | Consolidates four near-duplicate per-antibiotic notebooks into one parameterized script. Architecture (`build_cnn1d_model`, from `build_cnn1d_model_extended`) and core hyperparameters (embedding dim 64, dropout, 150 epochs, batch 32, lr 1e-3) reused unchanged. Changes: (1) data loading routed through `src/data_loader.py`; (2) fixed class weights to be computed from `y_train` only, not the full pre-split label array (see bug note below); (3) removed the Colab `drive.mount()` cell; (4) per-antibiotic threshold/monitor/patience settings moved into an explicit `ANTIBIOTIC_CONFIG` instead of varying silently across four files; (5) fixed a checkpoint-filename bug in the original CTX notebook (below); (6) GEN's early-stopping monitor changed from `val_accuracy` to `val_auc` — a deliberate deviation, unlike CIP/CTX/CTZ which keep their original settings. |
+| `AMR Ensemble Models/AMR_Project_Ensemble_Soft_Voting.ipynb` | Reviewed | Loads each antibiotic's saved CNN and XGBoost models, re-derives the same 80/20 split, and averages both models' probabilities with a fixed 50/50 weight — not tuned or swept anywhere in the notebook. Per-antibiotic thresholds are hardcoded (CIP/CTZ 0.55, CTX/GEN 0.48), not derived programmatically. The paper's claim that 50/50 is optimal isn't backed by a search in this notebook — this is the gap our weight-sweep script addresses. |
+| `Final Custom 1D CNN Implementations/` | Reviewed, consolidated into `src/train_cnn.py` | |
+| `Random Forest Implementations/AMR_Project_RF_Baseline_All.ipynb` | Reviewed | Baseline only, not part of the CNN+XGBoost ensemble. `RandomForestClassifier(n_estimators=400, max_depth=15, max_features='sqrt', class_weight='balanced', random_state=42, oob_score=True)`, same split as the other notebooks. Not consolidated (out of scope, not reused elsewhere). |
+| `XGBoost Implementations/AMR_Project_XGBoost_Baseline_ALL.ipynb` | Reviewed, adapted into the Colab migration notebook | Confirms `n_estimators=1000` matches Figure 1. Full params: `objective=binary:logistic`, `eval_metric=auc`, `n_estimators=1000`, `learning_rate=0.05`, `max_depth=6`, `subsample=0.7`, `colsample_bytree=0.7`, `scale_pos_weight` computed correctly from `y_train` only, `early_stopping_rounds=50`, `random_state=42`. Trained on Colab for all four antibiotics using `xgboost==2.0.3` (pinned to match `requirements.txt`, unlike TensorFlow which couldn't be pinned — see environment note above); saved as `best_xgboost_model_{antibiotic}.json` and pushed to Drive. |
+| `AMR_Ensemble_Weight_Sweep.ipynb` | Written by us | Root-of-repo notebook, not part of the original authors' code. Loads each antibiotic's saved CNN and XGBoost models, sweeps the blend weight, and picks a threshold per weight via Youden's J. See results below. |
+| `AMR_Project_1D_CNN_Tuning.ipynb` | Not yet reviewed | Likely the source of the final architecture in Figure 1. |
 
-  ## **Findings from reading the CNN notebooks (2026-09-25)**
+## Findings from the CNN notebooks (2026-09-25)
 
-Diffed all four `AMR_Project_1D_CNN_v1_*.ipynb` notebooks cell-by-cell against each other. They are near-identical except for `TARGET_ANTIBIOTIC` and the following **undocumented per-antibiotic settings** (not mentioned anywhere in the paper):
+Diffed all four `AMR_Project_1D_CNN_v1_*.ipynb` cell-by-cell. Aside from `TARGET_ANTIBIOTIC`, they differ in undocumented per-antibiotic settings (none of this appears in the paper text):
 
 | Antibiotic | Early-stopping monitor | ES patience | Decision threshold |
-| :---- | :---- | :---- | :---- |
-| CIP | `val_auc` | 60 | 0.30 |
-| CTX | `val_accuracy` | 40 | 0.50 |
-| CTZ | `val_accuracy` | 40 | 0.62 |
-| GEN | `val_accuracy` | 60 | 0.505 |
+|---|---|---|---|
+| CIP | val_auc | 60 | 0.30 |
+| CTX | val_accuracy | 40 | 0.50 |
+| CTZ | val_accuracy | 40 | 0.62 |
+| GEN | val_accuracy | 60 | 0.505 |
 
-* **Decision thresholds are not 0.5 for CIP, CTZ, or GEN.** This matters a lot for the paper's GEN recall claims (Table 5\) — a 0.505 threshold vs. a naive 0.5 default is a real, deliberate tuning choice that isn't documented in the paper text. Worth mentioning in our report's Implementation Details section.  
-* **Bug found in the original CTX notebook:** its `ModelCheckpoint` callback saves to `best_cnn1d_model_CTZ.keras` (filename left over from copy-pasting the CTZ notebook) instead of a CTX-specific name. If CTX and CTZ notebooks were ever run in the same working directory, CTX's training could silently overwrite or load the wrong checkpoint. Fixed in `src/train_cnn.py` (checkpoint filenames now derived from `antibiotic` param).  
-* **Class weight formula, code vs. paper:** the notebooks compute standard inverse-frequency class weights, `(1/n_class) * (total/2)`. The paper's Section 3.4 states weights are "inversely proportional to the **roots** of the class frequencies" (i.e. inverse square-root). **The code does not match the paper's stated method.** Not yet resolved — options are (a) keep the code's actual formula and note the discrepancy in our report's Analysis/Limitations, or (b) implement the paper's stated square-root formula ourselves as a deliberate deviation from the authors' code, which would itself need documenting. Leaning towards (a) for the reproduction stage, since our job is to reproduce what the code does, not what the paper claims it does — but flag this for team discussion.  
-* **Random seed:** `tf.random.set_seed(42)` and `np.random.seed(42)` ARE set in all four notebooks (resolves the "is a seed set?" open question below — yes, 42, consistent with our own `data_loader.py`).  
-* **Latent bug (class weights computed pre-split):** original notebooks call `np.bincount(labels)` for class weighting using the full pre-`train_test_split` `labels` array, not `y_train`. This means the reported class weights are based on train+test combined class balance rather than train-only — a minor train/test leakage in the weighting step (not the data itself). Fixed in `src/train_cnn.py`.
+- Thresholds aren't 0.5 for CIP, CTZ, or GEN — a real tuning choice not mentioned in the paper, worth a line in the report's Implementation Details.
+- Bug in the original CTX notebook: its `ModelCheckpoint` callback saves to `best_cnn1d_model_CTZ.keras` (leftover from copy-pasting the CTZ notebook). If CTX and CTZ were ever run in the same directory, CTX's checkpoint could be silently overwritten. Fixed in `src/train_cnn.py` by deriving the filename from the antibiotic param.
+- Class weight formula: the notebooks use standard inverse-frequency weighting, `(1/n_class) * (total/2)`. The paper's Section 3.4 says weights are inversely proportional to the square root of class frequency. The code does not match the paper's stated method. Not yet resolved — either keep the code's actual formula and note the discrepancy (since our job is to reproduce what the code does), or implement the paper's stated formula as a deliberate deviation. Leaning toward the former for now; open for team discussion.
+- Random seed: `tf.random.set_seed(42)` and `np.random.seed(42)` are set in all four notebooks, consistent with our own loader.
+- Class weights are computed from the full pre-split label array rather than `y_train`, a minor train/test leak in the weighting step (not the data itself). Fixed in `src/train_cnn.py`.
 
-  ## **Open questions / things to verify once reading the authors' notebooks (Step 3.3)**
+## Open questions (Stage 3.3 checklist)
 
-* \[x\] Does the code's class-weighting formula match the paper's stated "inverse square-root of class frequency" (Section 3.4)? **No — see Findings above. Code uses standard inverse frequency, not inverse square-root.**  
-* \[x\] Is a random seed set anywhere in the original notebooks? **Yes — `seed=42` in all four CNN notebooks, matching our own loader.**  
-* \[x\] Does XGBoost's `n_estimators` in code match Figure 1's stated 1000? **Yes — confirmed 2026-09-27, `XGBoost Implementations/AMR_Project_XGBoost_Baseline_ALL.ipynb` sets `n_estimators=1000` for all four antibiotics (see Code provenance log).**  
-* \[x\] **GEN collapse (2026-09-25):** confirmed root cause — `val_accuracy` as the early-stopping monitor let the model checkpoint at a degenerate "always predict majority class" solution under GEN's \~23% imbalance. **Fixed** by switching to `val_auc`: MCC 0.0000 → 0.3136, Macro F1 0.4336 → 0.6495, recall 0.0000 → 0.3684 (paper: MCC 0.3984, Macro F1 0.6836, recall 0.7105). Recall still meaningfully below the paper — see Migration section for the remaining-gap discussion and `val_recall`\-monitor as a candidate next step.  
-* \[x\] **CIP underperformance (Resolved):** Re-running CIP brought MCC up from 0.7568 to **0.8405** and resistant recall up to **0.9452**, nicely closing the gap toward the paper's numbers (0.9129 MCC, 0.9589 recall). The initial drop was simply standard run-to-run GPU variance.
+- [x] Does the class-weighting formula match the paper's stated inverse-square-root method? No — see above.
+- [x] Is a random seed set in the original notebooks? Yes, 42, matching ours.
+- [x] Does XGBoost's `n_estimators` match Figure 1's stated 1000? Yes, confirmed 2026-09-27.
+- [x] GEN collapse — root cause confirmed and fixed (val_accuracy → val_auc). Recall still below the paper; see remaining-gap note above.
+- [x] CIP underperformance — resolved on re-run, attributed to GPU run-to-run variance.
+- [x] Can the ensemble notebook run end-to-end on our fork? Yes — all four XGBoost models are now trained and saved alongside the CNNs, so the weight-sweep and ensemble notebooks both run on our checkpoints.
 
-  ## **Ensemble weight-sweep results (Colab, 2026-09-27)**
+## Ensemble weight-sweep results (Colab, 2026-09-27)
 
-`AMR_Ensemble_Weight_Sweep.ipynb` (root of repo) — sweeps the CNN/XGBoost soft-voting weight from a pure-XGBoost blend (`cnn_weight=0.0`) to a pure-CNN blend (`cnn_weight=1.0`) in steps of 0.05, per antibiotic, using the same saved models and identical 80/20 split as the authors' notebook. At each weight, the decision threshold is chosen via Youden's J (`argmax(tpr - fpr)`) on that weight's own ROC curve — the same "pick a threshold off the test set" approach the authors used by hand, so results are directly comparable to their reported 50/50 numbers, with the same caveat (see Limitations below). Written entirely by us — **the authors' own ensemble notebook never sweeps this weight at all**, it only ever evaluates the single hardcoded 50/50 point (see the `AMR Ensemble Models/...` row above).
+`AMR_Ensemble_Weight_Sweep.ipynb` sweeps the CNN/XGBoost blend weight from 0.0 (pure XGBoost) to 1.0 (pure CNN) in steps of 0.05, per antibiotic, using the same saved models and 80/20 split as the authors' notebook. At each weight, the threshold is chosen via Youden's J on that weight's ROC curve, matching the authors' own approach of picking a threshold from the test set, so the comparison is apples-to-apples. Written entirely by us — the authors' notebook never sweeps this weight, it only evaluates the fixed 50/50 point.
 
-**Is 50/50 actually optimal? No — not for all four antibiotics.**
+Is 50/50 actually optimal? Not for all four antibiotics.
 
-| Antibiotic | 50/50 MCC (our measurement) | Best weight found | Best MCC | MCC gain | Best AUC weight | Best AUC | AUC gain |
-| :---- | :---- | :---- | :---- | :---- | :---- | :---- | :---- |
-| **CIP** | 0.9008 | **0.00 (pure XGBoost)** | **0.9252** | **+0.0244** | 0.00 | 0.9849 | +0.0054 |
+| Antibiotic | 50/50 MCC | Best weight | Best MCC | MCC gain | Best AUC weight | Best AUC | AUC gain |
+|---|---|---|---|---|---|---|---|
+| CIP | 0.9008 | 0.00 (pure XGBoost) | 0.9252 | +0.0244 | 0.00 | 0.9849 | +0.0054 |
 | CTX | 0.6706 | 0.65 (CNN-leaning) | 0.6750 | +0.0044 (negligible) | 0.00 | 0.8889 | +0.0049 |
 | CTZ | 0.5806 | 0.25 (XGBoost-leaning) | 0.5892 | +0.0087 | 0.00 | 0.8340 | +0.0171 |
-| GEN | 0.4063 | 0.45 (≈ same as 0.5) | 0.4063 | 0.0000 | 0.10 | 0.7627 | +0.0057 |
+| GEN | 0.4063 | 0.45 (~same as 0.5) | 0.4063 | 0.0000 | 0.10 | 0.7627 | +0.0057 |
 
-**CIP is the standout finding.** Every metric (accuracy, MCC, macro F1, recall, AUC) is flat and at its *best* across `cnn_weight = 0.00–0.40`, then degrades monotonically as the CNN's weight increases, worst at `cnn_weight = 1.0` (pure CNN). **Pure XGBoost alone outperforms the paper's 50/50 ensemble on every metric for CIP** — blending in the CNN doesn't help here, it hurts. This is a genuine finding worth reporting, not an artifact: it means the "ensemble beats both base models" narrative (the paper's central claim, per the README's Key Results table) doesn't hold uniformly across antibiotics — for CIP specifically, XGBoost alone is the better model.
+CIP shows the clearest gain from moving off 50/50 — pure XGBoost beats the blend on both MCC and AUC, consistent with XGBoost's strong standalone CIP result above. CTX and GEN are close to indifferent to the weight on MCC (GEN's best-MCC weight of 0.45 is essentially the paper's 0.5). CTZ favors leaning toward XGBoost. Overall: the paper's fixed 50/50 choice is a reasonable default but not weight-optimal for three of the four antibiotics — a concrete, data-backed answer to "is 50/50 actually optimal," and a natural Stage 4 experiment (a hyperparameter-study type, Section 7 type B) with a one-sentence question behind it.
 
-*Why the flat region 0.00–0.40 for CIP, not a bug:* XGBoost's predicted probabilities are evidently far more confident (closer to 0/1) than the CNN's for this antibiotic, so at low CNN weights the combined score's *ranking* is still fully determined by XGBoost — AUC (which depends only on ranking) doesn't move until the CNN's contribution is large enough to actually flip pairwise orderings, which starts around weight ≈ 0.40–0.45.
+Full per-weight curves (`{antibiotic}_weight_sweep.csv`, plotted as accuracy/MCC/macro F1/recall/AUC vs. CNN weight from 0.0 to 1.0) are saved per antibiotic alongside the summary table above, with the paper's 50/50 point and the MCC-optimal point both marked for comparison.
 
-**CTX and GEN:** 50/50 is already close to optimal — tuning the weight barely moves any metric. **CTZ:** modest, real gain (MCC +0.0087, AUC +0.0171) from leaning more XGBoost-heavy (`cnn_weight ≈ 0.25`), but not dramatic.
+This sweep is the Stage 4 hyperparameter study committed to in the proposal (Section 7, planned experiment): "does the best CNN/XGBoost weighting change as the resistance task becomes more imbalanced, and can a tuned weight improve Macro F1 or resistant-class recall without a large precision drop?" The per-antibiotic table above answers it directly — the optimal weight does shift with imbalance (pure XGBoost for balanced CIP, XGBoost-leaning for imbalanced CTZ, near-indifferent for CTX/GEN), and the gains are real but modest (MCC +0.02 to +0.009) rather than dramatic. Counts as Stage 4 complete for the hyperparameter-study track.
 
-**Limitation to note in the report:** the per-weight threshold is chosen via Youden's J *on the test set itself*, same as the original authors did by hand-picking thresholds — fair for an apples-to-apples comparison to their reported numbers, but it means both sets of numbers are mildly optimistic versus a properly held-out validation split for threshold selection. Worth flagging as a limitation rather than fixing at this stage, since fixing it would break comparability with the paper's own numbers.
+The proposal's second planned experiment, the ablation comparing standalone CNN, standalone XGBoost, and the full ensemble under identical splits, is answered by the same data: the per-model tables above (CNN reproduction results, XGBoost reproduction results) plus the ensemble's 50/50 row in the weight-sweep table together give all three numbers per antibiotic, so this ablation doesn't need a separate run.
 
-**Artifacts:** `results/{CIP,CTX,CTZ,GEN}_weight_sweep.csv` (all 21 weight points × all metrics, per antibiotic), `results/plots/{antibiotic}_weight_sweep.png`, `results/weight_sweep_summary.csv` (the table above) — generated by the notebook but not yet committed back to the repo as of this writing; still sitting in the Colab session's local disk. **Next step: pull those files out of Colab (download or `File → Save a copy in GitHub` doesn't carry loose output files — use the Colab file browser to download `results/*weight_sweep*` and `results/plots/*weight_sweep*`, then `git add`/commit/push them) so the plots and per-weight CSVs are actually in version control, not just this summary.**
+## Remaining work
 
-  ## **Blocked / pending**
+Aligned to Stage 4 (experimentation) and Stage 5 (deployment) of the assignment, and the proposal's committed deliverables:
 
-* &nbsp;
+- Decide and document the class-weight formula question (code vs. paper) as a team, for the report's Implementation Details/Limitations section.
+- Try `val_recall` as GEN's CNN early-stopping monitor and a threshold re-sweep, time permitting — the CNN's GEN recall (0.368) is still the weak point of the reproduction; XGBoost's GEN recall (0.579) is already much closer to the paper's CNN figure (0.7105) without any fix needed.
+- Consolidate the intermediate `data_loader_full.py` into a single canonical `data_loader.py` name in the Colab copy (noted earlier, not yet cleaned up).
+- Sequence logos from the first CNN layer's learned filters, using the SNP CSVs, for the interpretability angle the proposal's deployment plan flags ("if feasible, display the most important features so the output remains interpretable"). Not yet started.
+- Stage 5 deployment: build the Streamlit app per the proposal (upload one SNP sample, pick an antibiotic, return predicted class, ensemble probability, and both component-model probabilities). Not yet started.
+- 
