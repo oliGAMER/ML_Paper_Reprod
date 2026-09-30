@@ -168,6 +168,14 @@ Method, in notes:
 - XGBoost retrained from scratch at each k (n_estimators=300, max_depth=6, lr=0.05, subsample/colsample=0.8), same decision thresholds as the original per-antibiotic notebooks (CIP 0.30, CTX 0.50, CTZ 0.62, GEN 0.505).
 - Full results: `k_sweep_results.csv`. Plots: `k_sweep.png` (MCC/AUC/F1/accuracy vs. k, log x-axis, all four antibiotics) and `chi2_significance_{CIP,CTX,CTZ,GEN}.png` (per-antibiotic chi2 score vs. feature rank, with the Bonferroni cutoff marked).
 
+### Top-SNP sequence logos
+
+Added `plot_top_snp_logo()` to the same notebook: a single-position sequence logo per SNP, using `logomaker`, with letter height = base frequency (probability) at that one position across all training samples. Token map: `{0: 'N', 1: 'A', 2: 'C', 3: 'G', 4: 'T'}` — token 0 is plotted as N (missing/uncalled) rather than dropped, so all five symbols appear in the logo's color scheme.
+
+Generated for the top 50 chi2-ranked SNP positions per antibiotic (reusing the same `SNPFeatureSelector` scores as the k-sweep above, computed on the training split only), 200 logos total. Saved individually as `results/plots/top_snp_logos/top_snp_logo_{antibiotic}_rank_{1-50}_{feature_name}.png`, ranked 1 (highest chi2 score) to 50.
+
+Each logo shows one position in isolation (x-axis hidden, since there's only one column) rather than a multi-position motif — this is a per-SNP allele-frequency logo, not a windowed sequence motif around each SNP. Useful for a quick visual read of how skewed/mixed each top-ranked position is across the training set, complementing the chi2-score-vs-rank plots already logged above.
+
 Findings, in notes:
 - CIP: MCC peaks at k=3,524–3,886 (MCC 0.9008, matching the full-feature ensemble result almost exactly) then **drops** back down at higher k (60,935: MCC 0.8770). More features past a few thousand doesn't help CIP and can hurt slightly.
 - CTX: best MCC (0.6278) is at the full 60,936 features — the only antibiotic where more features keep helping all the way up. Small-k performance is noticeably worse (k=847: MCC 0.4392).
@@ -183,6 +191,6 @@ Aligned to Stage 4 (experimentation) and Stage 5 (deployment) of the assignment,
 - Decide and document the class-weight formula question (code vs. paper) as a team, for the report's Implementation Details/Limitations section.
 - Try `val_recall` as GEN's CNN early-stopping monitor and a threshold re-sweep, time permitting — the CNN's GEN recall (0.368) is still the weak point of the reproduction; XGBoost's GEN recall (0.579) is already much closer to the paper's CNN figure (0.7105) without any fix needed.
 - Consolidate the intermediate `data_loader_full.py` into a single canonical `data_loader.py` name in the Colab copy (noted earlier, not yet cleaned up).
-- Sequence logos from the first CNN layer's learned filters, using the SNP CSVs, for the interpretability angle the proposal's deployment plan flags ("if feasible, display the most important features so the output remains interpretable"). Not yet started.
+- Top-SNP sequence logos done (single-position, chi2-ranked, top 50 per antibiotic — see above). Sequence logos from the first CNN layer's learned filters (a windowed motif logo, different from the per-SNP logos above) still not started, if wanted for the interpretability angle the proposal's deployment plan flags ("if feasible, display the most important features so the output remains interpretable").
 - Stage 5 deployment: build the Streamlit app per the proposal (upload one SNP sample, pick an antibiotic, return predicted class, ensemble probability, and both component-model probabilities). Not yet started.
 - Consider whether the k-sweep's smaller feature sets (e.g. CIP at k≈3,886, GEN at k≈415) should feed into the deployed model, since they match or beat full-feature performance with a much smaller input.
