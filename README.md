@@ -184,6 +184,25 @@ The proposal's planned hyperparameter study: does the best CNN/XGBoost blend wei
 
 Answer: no, 50/50 is not weight-optimal for three of the four antibiotics, though the gains are modest (+0.004 to +0.024 MCC). CIP shows the clearest case for moving off 50/50 toward pure XGBoost. The proposal's related ablation (standalone CNN vs. standalone XGBoost vs. full ensemble) is answered by the same data, since the per-model tables above plus the ensemble's 50/50 row together give all three numbers per antibiotic.
 
+## Feature-selection k-sweep (second Stage 4 experiment, branch `M3_Own_Experiment`)
+
+Branch: https://github.com/oliGAMER/ML_Paper_Reprod/tree/M3_Own_Experiment
+
+Question: does XGBoost need the full 60,936 SNP features, or does a smaller, statistically-selected subset do just as well?
+
+Method: chi-squared feature scoring (own implementation, categorical 5-way SNP tokens) on the training split only, per antibiotic; log-spaced k from 100 to 60,936 plus each antibiotic's Bonferroni-significant feature count; XGBoost retrained from scratch at each k.
+
+| Antibiotic | Best k | Best MCC | Full-feature MCC | Bonferroni-significant features |
+| :--- | :--- | :--- | :--- | :--- |
+| CIP | ~3,500-3,900 | 0.9008 | 0.8770 (drops with more features) | 3,886 |
+| CTX | 60,936 (full) | 0.6278 | 0.6278 | 786 |
+| CTZ | ~415-847 | 0.5960 | 0.5806 | 724 |
+| GEN | 415 | 0.4403 | 0.3930 (beats both full-feature and the paper's XGBoost MCC of 0.3722) | 349 |
+
+Answer: yes, for CIP, CTZ and GEN, a few hundred to a few thousand well-chosen features (well under 10% of the full matrix) match or beat using everything. Only CTX clearly benefits from the full feature set. GEN's result is the standout: feature selection outperforms both this fork's full-feature XGBoost and the paper's own reported XGBoost MCC on the hardest, most imbalanced antibiotic. Full data and plots: `k_sweep_results.csv`, `k_sweep.png`, `chi2_significance_{CIP,CTX,CTZ,GEN}.png`.
+
+Together, the weight sweep and the k-sweep answer both experiment slots committed to in the proposal (Section 7).
+
 ## Remaining work
 
 - Class-weight formula: the original notebooks use standard inverse-frequency class weighting, but the paper's Section 3.4 states weights are inversely proportional to the square root of class frequency. Not yet resolved as a team whether to keep the code's actual formula (documenting the discrepancy) or implement the paper's stated formula as a deliberate deviation.
@@ -191,5 +210,6 @@ Answer: no, 50/50 is not weight-optimal for three of the four antibiotics, thoug
 - Consolidate the intermediate `data_loader_full.py` into a single canonical `data_loader.py`.
 - Sequence logos from the first CNN layer's learned filters, using the SNP CSVs, for the interpretability angle flagged in the deployment plan.
 - Stage 5 deployment: a Streamlit app that takes one SNP sample and an antibiotic choice, and returns the predicted class, ensemble probability, and both component-model probabilities.
+- Consider feeding the k-sweep's smaller feature sets into the deployed model, since they match or beat full-feature performance with a much smaller input.
 
 Full detail, including bug fixes found in the original notebooks and the security incident writeup, is in `PROVENANCE.md`.
