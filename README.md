@@ -201,6 +201,8 @@ Method: chi-squared feature scoring (own implementation, categorical 5-way SNP t
 
 Answer: yes, for CIP, CTZ and GEN, a few hundred to a few thousand well-chosen features (well under 10% of the full matrix) match or beat using everything. Only CTX clearly benefits from the full feature set. GEN's result is the standout: feature selection outperforms both this fork's full-feature XGBoost and the paper's own reported XGBoost MCC on the hardest, most imbalanced antibiotic. Full data and plots: `k_sweep_results.csv`, `k_sweep.png`, `chi2_significance_{CIP,CTX,CTZ,GEN}.png`.
 
+**Top-SNP sequence logos:** for each antibiotic, generated a single-position `logomaker` sequence logo for the top 50 chi2-ranked SNPs (200 logos total), letter height = base frequency (A/C/G/T/N) at that position across the training samples. Saved under `results/plots/top_snp_logos/`, one PNG per SNP, ranked by chi2 score. A quick visual read of how skewed or mixed the top-ranked positions are — not a windowed motif around each SNP, just that one position's allele-frequency breakdown.
+
 Together, the weight sweep and the k-sweep answer both experiment slots committed to in the proposal (Section 7).
 
 ## Remaining work
@@ -208,7 +210,7 @@ Together, the weight sweep and the k-sweep answer both experiment slots committe
 - Class-weight formula: the original notebooks use standard inverse-frequency class weighting, but the paper's Section 3.4 states weights are inversely proportional to the square root of class frequency. Not yet resolved as a team whether to keep the code's actual formula (documenting the discrepancy) or implement the paper's stated formula as a deliberate deviation.
 - GEN's CNN recall gap: try `val_recall` as the early-stopping monitor and a threshold re-sweep, since XGBoost's GEN recall is already much closer to the paper's CNN figure without any fix.
 - Consolidate the intermediate `data_loader_full.py` into a single canonical `data_loader.py`.
-- Sequence logos from the first CNN layer's learned filters, using the SNP CSVs, for the interpretability angle flagged in the deployment plan.
+- Top-SNP sequence logos done (see above). Sequence logos from the first CNN layer's learned filters — a windowed motif logo, not the per-SNP logos above — still not started, if wanted for the interpretability angle flagged in the deployment plan.
 - Stage 5 deployment: a Streamlit app that takes one SNP sample and an antibiotic choice, and returns the predicted class, ensemble probability, and both component-model probabilities.
 - Consider feeding the k-sweep's smaller feature sets into the deployed model, since they match or beat full-feature performance with a much smaller input.
 
