@@ -154,6 +154,28 @@ This sweep is the Stage 4 hyperparameter study committed to in the proposal (Sec
 
 The proposal's second planned experiment, the ablation comparing standalone CNN, standalone XGBoost, and the full ensemble under identical splits, is answered by the same data: the per-model tables above (CNN reproduction results, XGBoost reproduction results) plus the ensemble's 50/50 row in the weight-sweep table together give all three numbers per antibiotic, so this ablation doesn't need a separate run.
 
+## Feature-selection k-sweep (M3 submission, branch `M3_Own_Experiment`)
+
+Branch: https://github.com/oliGAMER/ML_Paper_Reprod/tree/M3_Own_Experiment
+Notebook: `AMR-EnsembleNet — Feature Selection k-Sweep (k SNPs vs. Performance).ipynb`, written by us.
+
+Question: does XGBoost need all 60,936 SNP features, or does a smaller subset selected by statistical relevance perform just as well or better?
+
+Method, in notes:
+- Custom categorical chi-squared test (own implementation, not sklearn's `chi2`, since SNP tokens are 5-way categorical: 0-4) computed on the training split only, per antibiotic, no leakage.
+- k values log-spaced from 100 to 60,936 (`np.logspace`, 10 points) plus the full feature count, plus each antibiotic's own Bonferroni-significant feature count (α = 0.05 / 60,936 ≈ 8.21e-7) added as an extra k point.
+- Bonferroni-significant feature counts varied a lot by antibiotic: CIP 3,886, CTX 786, CTZ 724, GEN 349 — consistent with CIP being the antibiotic with the strongest overall signal and GEN the weakest, matching the reproduction results above.
+- XGBoost retrained from scratch at each k (n_estimators=300, max_depth=6, lr=0.05, subsample/colsample=0.8), same decision thresholds as the original per-antibiotic notebooks (CIP 0.30, CTX 0.50, CTZ 0.62, GEN 0.505).
+- Full results: `k_sweep_results.csv`. Plots: `k_sweep.png` (MCC/AUC/F1/accuracy vs. k, log x-axis, all four antibiotics) and `chi2_significance_{CIP,CTX,CTZ,GEN}.png` (per-antibiotic chi2 score vs. feature rank, with the Bonferroni cutoff marked).
+
+Findings, in notes:
+- CIP: MCC peaks at k=3,524–3,886 (MCC 0.9008, matching the full-feature ensemble result almost exactly) then **drops** back down at higher k (60,935: MCC 0.8770). More features past a few thousand doesn't help CIP and can hurt slightly.
+- CTX: best MCC (0.6278) is at the full 60,936 features — the only antibiotic where more features keep helping all the way up. Small-k performance is noticeably worse (k=847: MCC 0.4392).
+- CTZ: best MCC (0.5960) around k=415-847, close to flat from there — a small, well-chosen feature set does as well as everything.
+- GEN: best MCC (0.4403) at k=415, actually **above** both the full-feature XGBoost result (0.3930) and the paper's own XGBoost MCC (0.3722) — the clearest case where feature selection helps rather than just matching baseline. Performance is noisy and non-monotonic at low k, consistent with GEN's small resistant class making any subset estimate noisier.
+- Overall: three of four antibiotics (CIP, CTZ, GEN) reach their best or near-best MCC with a few hundred to a few thousand features, well under 10% of the full 60,936 — only CTX clearly wants the full matrix. This is a useful complement to the ensemble weight-sweep: together they show the paper's fixed choices (50/50 blend, full feature matrix) aren't optimal for every antibiotic, and the right setting depends on how imbalanced/noisy that antibiotic's resistance signal is.
+- This is the assignment's second Stage 4 experiment type: a data-size/feature-scaling study (Section 7 type E, adapted to feature count rather than sample count), separate from the ensemble-weight hyperparameter study already logged above. Together they cover both planned-experiment slots from the proposal (Section 7), the hyperparameter study explicitly and this one as the natural follow-on question raised while reviewing the paper's feature-heavy setup.
+
 ## Remaining work
 
 Aligned to Stage 4 (experimentation) and Stage 5 (deployment) of the assignment, and the proposal's committed deliverables:
@@ -163,4 +185,4 @@ Aligned to Stage 4 (experimentation) and Stage 5 (deployment) of the assignment,
 - Consolidate the intermediate `data_loader_full.py` into a single canonical `data_loader.py` name in the Colab copy (noted earlier, not yet cleaned up).
 - Sequence logos from the first CNN layer's learned filters, using the SNP CSVs, for the interpretability angle the proposal's deployment plan flags ("if feasible, display the most important features so the output remains interpretable"). Not yet started.
 - Stage 5 deployment: build the Streamlit app per the proposal (upload one SNP sample, pick an antibiotic, return predicted class, ensemble probability, and both component-model probabilities). Not yet started.
-- 
+- Consider whether the k-sweep's smaller feature sets (e.g. CIP at k≈3,886, GEN at k≈415) should feed into the deployed model, since they match or beat full-feature performance with a much smaller input.
