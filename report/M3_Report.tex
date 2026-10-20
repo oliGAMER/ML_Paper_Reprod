@@ -24,7 +24,7 @@ Haseeb Adnan (ERP 30483)
 \date{%
 Institute of Business Administration (IBA), Karachi \\
 Introduction to Machine Learning --- Instructor: Dr.\ Rizwan Ahmed Khan \\
-[SUBMISSION DATE]
+October 20, 2026
 }
 
 \begin{document}
@@ -333,6 +333,40 @@ This matters for how we explain the CNN/GEN gap in Section 6: part of what looks
 \subsection{A validation approach we had available but did not use}
 
 Section 4 mentioned that one of the authors' notebooks, the CNN tuning notebook, does the train/validation/test split correctly: it holds out a validation set from training and never uses the test set for early stopping, unlike every other CNN notebook we reproduced. We did not adapt that notebook's splitting logic into our pipeline --- our migration notebook and both sweeps inherited the test-as-validation pattern from the authors' other notebooks instead. This was a missed opportunity: a cleaner version of our reproduction, with a genuine validation set, was sitting in the same repository we were working from. If this project continued past Milestone 3, re-running the CNN and the two sweeps with a proper train/val/test split would be the single highest-value fix, since it would let every number in Sections 6 and 7 be reported without the leakage caveat attached.
+
+% =====================================================================
+\section{Deployment}
+% =====================================================================
+
+We built a small Streamlit app (\texttt{deployment/app.py} in our repository) with two interchangeable modes, Full and Optimized. A user picks an antibiotic (CIP, CTX, CTZ, or GEN), a feature-set mode, and then one isolate from a dropdown. That dropdown is not a free-text field: SNP vectors have up to 60,936 features, which nobody can type by hand, so instead it lists only the 162 isolates in that antibiotic's held-out test split (the same stratified 80/20 split, seed 42, used throughout Sections 6 and 7). Every isolate offered was therefore genuinely unseen by the model being queried, in either mode.
+
+\textbf{Full mode} serves the main reproduction's CNN and XGBoost pair from Section 6. On clicking ``Predict,'' it loads the isolate's real SNP row and label, runs it through both models, blends the two probabilities 50/50, and applies the paper's fixed threshold (0.55 for CIP/CTZ, 0.48 for CTX/GEN) to produce a Resistant/Susceptible call. It displays all three probabilities, the prediction, and the ground-truth label side by side with a match/mismatch indicator.
+
+\textbf{Optimized mode} serves the feature-selection k-sweep's finding from Section 7.2 instead: an XGBoost-only model (no CNN) trained on a much smaller, chi-squared-selected subset of features per antibiotic (CIP 3,524; CTX 60,936, i.e.\ the full set, since CTX is the one antibiotic that does not benefit from selection; CTZ 415; GEN 415), thresholded at the k-sweep's own per-antibiotic values (0.30/0.50/0.62/0.505, reused from the CNN's early-stopping thresholds in Section 4, not the ensemble thresholds above). No model trained on these reduced feature sets existed before this deployment --- the k-sweep notebook logs metrics per $k$ but discards each model it trains --- so we retrained one XGBoost model per antibiotic specifically for this app, using the k-sweep notebook's exact selection method and hyperparameters. Retraining reproduced CTZ's and GEN's published k-sweep metrics almost exactly, but CIP and CTX came out close rather than identical (CIP MCC 0.877 vs.\ 0.901 published; CTX MCC 0.605 vs.\ 0.628 published), most likely because of an XGBoost version difference between whatever ran the original k-sweep on Colab and the version available for this deployment. We record this in \texttt{deployment/README.md} rather than conceal it; it does not change any number reported in Section 7, since those come from the original k-sweep run, not from this redeployed copy.
+
+We tested both modes directly rather than assuming they worked. For Full mode, a plain Python script using the same loading and inference functions the app calls confirmed the predicted probabilities are correct for all four antibiotics, and running the app itself in a browser produced both a correct case (CIP, isolate \texttt{H108\_S5\_L001}: CNN 0.084, XGBoost 0.009, ensemble 0.046, predicted and true label both Susceptible) and an incorrect one (GEN, isolate \texttt{H105\_S3\_L001}: CNN 0.504, XGBoost 0.763, ensemble 0.633, predicted Resistant against a true label of Susceptible). For Optimized mode, the same kind of script confirmed correct loading, feature slicing, and prediction for all four antibiotics; browser confirmation is still pending at the time of writing. Full run instructions, the input/output format, and a screenshot are in \texttt{deployment/README.md}.
+
+% =====================================================================
+\section{Limitations}
+% =====================================================================
+
+\textbf{Test-set-as-validation leakage.} As Sections 4 and 8 discuss at length, the CNN notebooks use the test set for early stopping, the paper's ensemble thresholds appear to have been chosen by checking test performance, and our own weight sweep and k-sweep pick their headline ``best'' values by the same method. Every accuracy, MCC, and AUC number in this report should be read as mildly optimistic, not as an unbiased estimate of performance on new data.
+
+\textbf{Single-seed training.} We trained each model once (seed 42), except where Section 6 notes a re-run. CIP's two CNN runs under identical settings produced MCCs of 0.7568 and 0.8405, which tells us run-to-run variance exists but not how large it typically is. None of our point estimates come with a confidence interval.
+
+\textbf{GEN's apparent CNN weakness is partly a calibration issue, not purely a modelling one.} Section 8.4 shows the CNN's own optimal threshold for GEN (0.139) sits far below the paper's fixed threshold (0.505), so some of GEN's poor fixed-threshold performance reflects miscalibrated output scale rather than the model ranking isolates incorrectly. We cannot fully separate these two explanations with the data we have.
+
+\textbf{No dataset or compute substitution, but no scaling study either.} We used the same GieSSen dataset and the same 60,936-feature SNP matrix as the paper, trained on free-tier Colab GPUs. We did not test whether a smaller subset of isolates or features changes these conclusions, beyond the k-sweep's feature-count axis.
+
+\textbf{Two open items are documented, not fixed.} The SNP column duplicate-suffix question (Section 5) is resolved as to \emph{why} duplicates exist, but which gene each of the 16,446 base positions maps to remains unverified against a reference annotation. The k-sweep notebook's SNP-logo plotting code also has a known token-mapping bug (C and G swapped) that does not affect any reported metric, only the logo images, and was left unpatched since fixing it would not change a single number in this report.
+
+\textbf{The deployment app is a demonstration, not a clinical tool.} It only serves predictions for isolates already in our test split; it does not accept an arbitrary new genome, and it carries the same leakage and calibration caveats as every number it was built from.
+
+% =====================================================================
+\section{Conclusion}
+% =====================================================================
+
+We reproduced AMR-EnsembleNet's 1D CNN and XGBoost models for all four antibiotics, matching the paper's XGBoost results closely (within about 0.02 MCC on every antibiotic) and its CNN results less consistently (CTX above the paper, CTZ close, CIP and GEN below it). At the paper's fixed ensemble thresholds, our ensemble MCCs trail the paper's by 0.02--0.08, with GEN showing the largest gap, which Section 8 traces mainly to threshold miscalibration rather than a weaker model. Our own experiment asked a question the paper never tested: is the paper's fixed 50/50 CNN/XGBoost blend, over all 60,936 features, actually the best choice? The answer is no on both counts for every antibiotic by AUC (the best-AUC weight sits at or near pure XGBoost, 0.00--0.10, for all four), though the best-MCC weight varies more (CTX leans CNN at 0.65, CTZ leans XGBoost at 0.25, GEN is roughly balanced), and a few hundred to a few thousand SNPs, selected by a simple chi-squared test, often match or beat using all 60,936. Finally, the Streamlit app in Section 9 turns this pipeline into something a user can actually query, closing the loop from paper to a working, if modest, deployed demonstration.
 
 % =====================================================================
 \section{References}
