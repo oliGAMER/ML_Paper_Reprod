@@ -22,7 +22,7 @@ import pandas as pd
 import streamlit as st
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
-from tensorflow import keras
+import tensorflow as tf
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SNP_PATH = REPO_ROOT / "Giessen_dataset" / "cip_ctx_ctz_gen_multi_data.csv"
@@ -63,7 +63,7 @@ def load_data():
 def load_full_models():
     cnn_models, xgb_models = {}, {}
     for ab in ANTIBIOTICS:
-        cnn_models[ab] = keras.models.load_model(
+        cnn_models[ab] = tf.keras.models.load_model(
             RESULTS_DIR / f"best_cnn1d_model_{ab}.keras"
         )
         clf = xgb.XGBClassifier()
@@ -90,7 +90,7 @@ def get_test_split(antibiotic: str):
     # seed 42, so this app only ever shows isolates the models never trained on.
     snp, pheno = load_data()
     X = snp.values.astype(np.int32)
-    y = pheno[antibiotic].values
+    y = np.asarray(pheno[antibiotic].values)
     ids = snp.index.to_numpy()
     _, X_test, _, y_test, _, id_test = train_test_split(
         X, y, ids, test_size=0.2, stratify=y, random_state=42
